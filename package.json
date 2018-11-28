@@ -6,6 +6,7 @@
   "main": "src/index.js",
   "dependencies": {
     "evergreen-ui": "4.7.1",
+    "fast-deep-equal": "2.0.1",
     "ramda": "0.26.1",
     "react": "16.5.2",
     "react-dom": "16.5.2",
