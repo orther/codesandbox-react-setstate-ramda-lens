@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom";
 import R from "ramda";
+import deepEqual from "fast-deep-equal";
 
 import App from "./App";
 
@@ -19,78 +20,103 @@ const data = { one: 1, nest: { two: 2 } };
 const onePath = ["one"];
 const twoPath = ["nest", "two"];
 // :: 1) Reading Values
-R.path(onePath, data); // => 1
-R.path(twoPath, data); // => 2
+const noLGet1 = R.path(onePath, data); // => 1
+const noLGet2 = R.path(twoPath, data); // => 2
 // :: 2) Setting Values
-R.assocPath(onePath, "Uno", data); // => { one: 'Uno', nest: { two: 2 } }
-R.assocPath(twoPath, "Dos", data); // => { one: 1, nest: { two: 'Dos' } }
-// :: 3) Updating Values
-//    3a - R.converge + R.assocPath + R.path = verbose & convoluted
-const updateConverge = (path, updateFn) =>
-  R.converge(
-    // converging fn           :: <- (1) R.assocPath(onePath)
-    R.assocPath(path),
-    [
-      // branch fn => newValue :: <- (2) R.assocPath(onePath)(newValue)
-      R.pipe(
-        R.path(path),
-        updateFn,
-      ),
-      // branch fn => data     :: <- (3) R.assocPath(onePath)(newValue)(data)
-      R.identity, // (=> data)
-    ],
-  );
+const noLSet1 = R.assocPath(onePath, "Uno", data); // => { one: 'Uno', nest: { two: 2 } }
+const noLSet2 = R.assocPath(twoPath, "Dos", data); // => { one: 1, nest: { two: 'Dos' } }
+// :: 3a) Updating Values w/ evolve
+const noLUpdate1Evolve = R.evolve({ one: R.negate }, data); // => { one: -1, nest: { two: 2 } }
+const noLUpdate2Evolve = R.evolve({ nest: { two: R.negate } }, data); // => { one: 1, nest: { two: -2 } }
 
-updateConverge(onePath, R.negate);
-const twoNegate = updateConverge(twoPath, R.negate);
-console.log(oneNegate(data));
-console.log(twoNegate(data));
+// NOTE: R.evolve is simplest way to update object value by applying fn to
+//       existing value. R.evolve does have two Obvious disadvantages though;
+//       1) can't use the path array and 2) it's less performant because it has
+//       to dynamically do nested shallow copies.
+//
+//       Below is R.converge + R.assocPath + R.path update alternative to evolve
+//       that does use path array and doesn't have evolve's performance concerns.
+//       The problem with this solution is that it's verbose, repetitive, and
+//       convoluted. If you aren't familure with R.converge this isn't intuitive
+//       at all. The short explination is that we are building up R.assocPath fn
+//       in three steps:
+//         -> (1) convergingFn                <= R.assocPath(onePath)
+//         -> (2) branchFn #1 (updateFn(val)) <= R.assocPath(onePath)(newValue)
+//         -> (3) branchFn #2 (R.identity)    <= R.assocPath(onePath)(newValue)(data)
 
-const lens3a1Out = R.converge(
-  R.assocPath(onePath), //   <- (1) R.assocPath(onePath)
-  [
+// :: 3b) Updating Values w/ converge + assocPath + path
+const updateConverge = updateFn => path =>
+  R.converge(R.assocPath(path), [
     R.pipe(
-      R.path(onePath),
-      R.negate,
-    ), // => newValue        <- (2) R.assocPath(onePath)(newValue)
-    R.identity, // => data   <- (3) R.assocPath(onePath)(newValue)(data)
-  ],
-)(data);
-R.evolve({ one: R.negate }, data); // => { one: -1, nest: { two: 2 } }
-R.evolve({ nest: { two: R.negate } }, data); // => { one: 1, nest: { two: -2 } }
-// NOTE: R,assocPath composed w/ R.path could be used instead of R.evolve
-//       but it's verbose. Obvious disadvantage Evolve is you can use the standard array of strings path format
-//       (e.g. onePath/twoPath) and it is less performant.
+      R.path(path),
+      updateFn,
+    ),
+    R.identity, // (=> data)
+  ]);
+const negatePath = updateConverge(R.negate);
+
+const noLUpdate1Converge = negatePath(onePath)(data); // => { one: -1, nest: { two: 2 } }
+const noLUpdate2Converge = negatePath(twoPath)(data); // => { one: 1, nest: { two: -2 } }
+
+// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 // -------------------
 // === WITH Lenses ===
 // -------------------
+
 // 0) Define Focal Points
 const oneLens = R.lensPath(["one"]);
 const twoLens = R.lensPath(["nest", "two"]);
+
 // 1) Reading Values
-R.view(oneLens, data); // => 1
-R.view(twoLens, data); // => 2
+const yesLGet1 = R.view(oneLens, data); // => 1
+const yesLGet2 = R.view(twoLens, data); // => 2
+
 // 2) Setting Values
-R.set(oneLens, "Uno", data); // => { one: 'Uno', nest: { two: 2 } }
-R.set(twoLens, "Dos", data); // => { one: 1, nest: { two: 'Dos' } }
+const yesLSet1 = R.set(oneLens, "Uno", data); // => { one: 'Uno', nest: { two: 2 } }
+const yesLSet2 = R.set(twoLens, "Dos", data); // => { one: 1, nest: { two: 'Dos' } }
+
 // 3) Updating Values
-R.over(oneLens, R.negate, data); // => { one: -1, nest: { two: 2 } }
-R.over(twoLens, R.negate, data); // => { one: 1, nest: { two: -2 } }
+const yesLUpdate1 = R.over(oneLens, R.negate, data); // => { one: -1, nest: { two: 2 } }
+const yesLUpdate2 = R.over(twoLens, R.negate, data); // => { one: 1, nest: { two: -2 } }
 
-// separate  (a lens) completely separate from the data operation.
-// A lens, allowing lenses to be built from less specific lenses, and also com
-// completely decoupled from data operation to be applied.
+// NOTES:
+//   R.view - Returns the value where lens is focused
+//   R.set  - Sets the value where lens is focused to passed in value
+//   R.over - Updates the value where lens is focused by applying function to current value
 
-// R.set  - updates the value the lesnse focuses on with the value passed in
+//
+//
+//
 
-// R.over - updates the value the lens focuses on by applying a function to it
+// -------------------------------------------
+// === Assert Operations Return Same Values ===
+// -------------------------------------------
 
-// R.lensPath returns a lens that is focused on the path provided
-const nameLens = R.lensPath(["person", "name"]);
-const ageLens = R.lensPath(["person", "age"]);
-const isActiveLens = R.lensPath(["user", "isActive"]);
-const userIdLens = R.lensPath(["user", "id"]);
+// :: 1) Reading Values
+assertEqual({ noLGet1, yesLGet1 });
+assertEqual({ noLGet2, yesLGet2 });
+
+// :: 2) Setting Values
+assertEqual({ noLSet1, yesLSet1 });
+assertEqual({ noLSet2, yesLSet2 });
+
+// :: 3) Updating Values
+assertEqual({ noLUpdate1Evolve, noLUpdate1Converge, yesLUpdate1 });
+assertEqual({ noLUpdate2Evolve, noLUpdate2Converge, yesLUpdate2 });
+
+function assertEqual({ ...vars }) {
+  const cond = Object.values(vars).every((val, i, arr) =>
+    deepEqual(val, arr[0]),
+  );
+
+  if (!cond) {
+    console.assert(false, { message: "Vars not equal", ...vars });
+    throw new Error("Assertion Failed!");
+  }
+}
 
 // -----------------------
 // -- Render App to DOM --
